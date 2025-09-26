@@ -7,6 +7,7 @@ const List<NewsChannel> defaultChannels = [
   NewsChannel(name: '民視新聞', videoId: 'ylYJSBUgaMA'),
   NewsChannel(name: 'TVBS新聞', videoId: 'm_dhMSvUCIc'),
   NewsChannel(name: '公視CH13', videoId: 'C6gYqSHLRw4'),
+  NewsChannel(name: '2025流行歌', videoId: 'u_hGvcGZua4'),
   NewsChannel(name: '東森新聞', videoId: 'V1p33hqPrUk'),
   NewsChannel(name: '華視新聞', videoId: 'wM0g8EoUZ_E'),
   NewsChannel(name: '東森財經新聞', videoId: '1I2iq41Akmo'),
