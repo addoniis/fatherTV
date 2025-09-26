@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+// 【確保導入 AddChannelPage】
+import 'package:news_stream_app/pages/add_channel_page.dart';
 // 【修正 1】: 導入 AboutPage (確保您已在 /lib/pages/about_page.dart 建立此檔案)
 import 'package:news_stream_app/pages/about_page.dart';
 
@@ -46,6 +48,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     String message, {
     bool success = true,
   }) {
+    // 【安全檢查】：確保 context 仍然掛載 (雖然在同步方法中不常見，但保持習慣)
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message, style: const TextStyle(fontSize: 16)),
@@ -56,7 +60,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   // ------------------------------------------------------------------
-  // 【匯入頻道 (覆蓋) 確認對話框】 (安全修正：在 await 之後檢查 mounted)
+  // 【匯入頻道 (覆蓋) 確認對話框】 (保持不變)
   // ------------------------------------------------------------------
   Future<void> _showImportConfirmationDialog(
     BuildContext context,
@@ -126,7 +130,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   // ------------------------------------------------------------------
-  // 【重置頻道 確認對話框】 (安全修正：在 await 之後檢查 mounted)
+  // 【重置頻道 確認對話框】 (保持不變)
   // ------------------------------------------------------------------
   Future<void> _showResetConfirmationDialog(
     BuildContext context,
@@ -203,12 +207,26 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       ),
       body: ListView(
         children: <Widget>[
-          // 頻道管理與排序 (保持不變)
+          // 【關鍵新增點 1】：獨立的「新增頻道」入口
+          _buildSettingsTile(
+            context,
+            icon: Icons.add_circle_outline, // 使用 + 號圖標
+            title: '新增頻道',
+            subtitle: '透過 YouTube 網址或 ID 建立新頻道',
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AddChannelPage()),
+              );
+            },
+          ),
+
+          // 頻道管理與排序 (修改描述，因為新增功能已獨立)
           _buildSettingsTile(
             context,
             icon: Icons.list,
             title: '頻道管理',
-            subtitle: '新增、刪減、排序及隱藏頻道',
+            subtitle: '刪減、排序及隱藏頻道',
             onTap: () {
               Navigator.push(
                 context,
