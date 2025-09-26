@@ -1,16 +1,16 @@
-// lib/pages/add_channel_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// 假設需要 YoutubePlayer 庫來轉換網址
+// 引入 YouTube Player 庫，用於解析 ID
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 // 使用別名 (as models) 引入 NewsChannel 類別
 import 'package:news_stream_app/models/channel.dart' as models;
-// 引入 Channel Provider
 import 'package:news_stream_app/providers/channel_provider.dart';
 
 class AddChannelPage extends ConsumerStatefulWidget {
-  const AddChannelPage({super.key});
+  // 關鍵新增點：接收一個可選的 NewsChannel 物件
+  final models.NewsChannel? channelToEdit;
+
+  const AddChannelPage({super.key, this.channelToEdit}); // 加入到建構式
 
   @override
   ConsumerState<AddChannelPage> createState() => _AddChannelPageState();
@@ -22,6 +22,17 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
   final _urlController = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // 關鍵新增點：如果是編輯模式，初始化 Controller 的值
+    if (widget.channelToEdit != null) {
+      _nameController.text = widget.channelToEdit!.name;
+      // 編輯時顯示 ID，而不是完整的 URL
+      _urlController.text = widget.channelToEdit!.videoId;
+    }
+  }
+
+  @override
   void dispose() {
     _nameController.dispose();
     _urlController.dispose();
@@ -29,19 +40,19 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
   }
 
   void _saveChannel() async {
-    // 改為 async 以等待 notifier.addChannel
     // 1. 驗證表單
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
+    // ============== 修正點：在這裡定義所有區域變數 ==============
     final name = _nameController.text.trim();
     final rawInput = _urlController.text.trim();
 
     // 2. 解析 YouTube ID
     String? videoId = YoutubePlayer.convertUrlToId(rawInput) ?? rawInput;
 
-    if (videoId.isEmpty) {
+    if (videoId == null || videoId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('無效的 YouTube ID 或網址'),
@@ -51,55 +62,89 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
       return;
     }
 
+    // 3. 取得 Channel Notifier
     final notifier = ref.read(channelListProvider.notifier);
     final allChannels = notifier.state;
+    // =======================================================
 
-    // 3. 檢查 ID 是否重複
-    final isDuplicate = allChannels.any((c) => c.videoId == videoId);
+    // 4. 判斷模式：編輯或新增
+    if (widget.channelToEdit != null) {
+      // ------------------- 編輯模式 -------------------
 
-    if (isDuplicate) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('此頻道 ID 已經存在於列表中。'),
-          backgroundColor: Colors.red,
-        ),
+      // 檢查 ID 是否重複 (如果 ID 改變且與現有頻道重複)
+      final existingChannelId = widget.channelToEdit!.id;
+      final isDuplicate = allChannels.any(
+        (c) => c.videoId == videoId && c.id != existingChannelId,
       );
-      return;
-    }
 
-    // 4. 建立並儲存新頻道
-    // 【修正：將 models.Channel 改為 models.NewsChannel】
-    final newChannel = models.NewsChannel(
-      id: null, // ID 設為 null，由資料庫自動生成
-      name: name,
-      videoId: videoId,
-      isHidden: false, // 預設可見
-      // order 將在 notifier 內部被重新計算，這裡可以暫時忽略
-      channelOrder: 0,
-    );
+      if (isDuplicate) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('此頻道 ID 已經被其他頻道使用。'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
 
-    try {
-      // 5. 新增頻道
-      await notifier.addChannel(newChannel);
+      // 執行更新邏輯
+      final updatedChannel = widget.channelToEdit!.copyWith(
+        name: name,
+        videoId: videoId,
+        // order 和 isHidden 保持不變
+      );
+
+      await notifier.updateChannel(updatedChannel);
+
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('頻道 "${name}" 新增成功！')));
-      Navigator.of(context).pop(); // 返回設定頁面
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('儲存頻道失敗: $e'), backgroundColor: Colors.red),
+      ).showSnackBar(SnackBar(content: Text('頻道 "$name" 更新成功！')));
+    } else {
+      // ------------------- 新增模式 -------------------
+
+      // 檢查 ID 是否重複
+      final isDuplicate = allChannels.any((c) => c.videoId == videoId);
+
+      if (isDuplicate) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('此頻道 ID 已經存在於列表中。'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // 建立並儲存新頻道
+      final newChannel = models.NewsChannel(
+        id: null,
+        name: name,
+        videoId: videoId,
+        isHidden: false,
+        channelOrder: 0,
       );
+
+      await notifier.addChannel(newChannel);
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('頻道 "$name" 新增成功！')));
     }
+
+    // 儲存完成後返回上一頁
+    Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
+    // 根據模式修改標題
+    final pageTitle = widget.channelToEdit != null ? '編輯頻道' : '新增頻道';
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('新增頻道'),
+        title: Text(pageTitle), // 使用變數
         backgroundColor: Colors.indigo,
         actions: [
-          // 放在 App Bar 上的儲存按鈕
           IconButton(
             icon: const Icon(Icons.save),
             onPressed: _saveChannel,
@@ -116,12 +161,12 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
             children: [
               TextFormField(
                 controller: _nameController,
-                style: const TextStyle(color: Colors.white), // 確保在深色背景下文字是白色
+                style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
                   labelText: '頻道名稱',
                   hintText: '例如：TVBS 新聞',
                   border: OutlineInputBorder(),
-                  labelStyle: TextStyle(color: Colors.white70), // Label 顏色
+                  labelStyle: TextStyle(color: Colors.white70),
                 ),
                 validator: (value) {
                   if (value == null || value.isEmpty) {

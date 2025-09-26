@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:news_stream_app/models/channel.dart';
 import 'package:news_stream_app/providers/channel_provider.dart';
+// 【關鍵新增點 1】：導入 AddChannelPage
+import 'package:news_stream_app/pages/add_channel_page.dart';
 // import 'package:news_stream_app/services/backup_service.dart'; // <--- 備份服務不再這裡使用，可移除
 
 class ChannelManagementPage extends ConsumerWidget {
@@ -15,6 +17,8 @@ class ChannelManagementPage extends ConsumerWidget {
     String message, {
     Color color = Colors.green,
   }) {
+    // 【安全檢查】：確保 context 仍然掛載
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -172,26 +176,51 @@ class ChannelManagementPage extends ConsumerWidget {
                       ), // 放大副標題
                     ),
 
-                    // 隱藏/顯示切換按鈕
-                    trailing: IconButton(
-                      icon: Icon(
-                        // 根據 isHidden 狀態顯示不同圖示
-                        channel.isHidden
-                            ? Icons.visibility_off
-                            : Icons.visibility,
-                        // 保持隱藏圖示為灰色，顯示圖示為綠色
-                        color: channel.isHidden ? Colors.grey : Colors.green,
-                      ),
-                      onPressed: () {
-                        // 切換狀態並通知資料庫和 Riverpod
-                        notifier.toggleHidden(channel);
-                        _showSnackbar(
-                          context,
-                          channel.isHidden
-                              ? '已顯示 ${channel.name}'
-                              : '已隱藏 ${channel.name}',
-                        );
-                      },
+                    // 【關鍵新增點 2】：新增編輯按鈕和隱藏/顯示按鈕的 Row
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min, // 確保 Row 只佔用所需的空間
+                      children: [
+                        // 1. 編輯按鈕
+                        IconButton(
+                          icon: const Icon(
+                            Icons.edit,
+                            color: Colors.blueAccent,
+                          ),
+                          onPressed: () {
+                            // 導航到 AddChannelPage，並傳入要編輯的頻道
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (ctx) =>
+                                    AddChannelPage(channelToEdit: channel),
+                              ),
+                            );
+                          },
+                        ),
+                        // 2. 隱藏/顯示切換按鈕
+                        IconButton(
+                          icon: Icon(
+                            // 根據 isHidden 狀態顯示不同圖示
+                            channel.isHidden
+                                ? Icons.visibility_off
+                                : Icons.visibility,
+                            // 保持隱藏圖示為灰色，顯示圖示為綠色
+                            color: channel.isHidden
+                                ? Colors.grey
+                                : Colors.green,
+                          ),
+                          onPressed: () {
+                            // 切換狀態並通知資料庫和 Riverpod
+                            notifier.toggleHidden(channel);
+                            _showSnackbar(
+                              context,
+                              channel.isHidden
+                                  ? '已顯示 ${channel.name}'
+                                  : '已隱藏 ${channel.name}',
+                            );
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 );

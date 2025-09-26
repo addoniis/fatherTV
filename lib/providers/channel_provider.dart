@@ -1,30 +1,42 @@
 // lib/providers/channel_provider.dart
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/channel.dart';
+// import 'package:news_stream_app/models/channel.dart' as models; // <--- 移除衝突的 as models 導入
+import '../models/channel.dart'; // <--- 使用此行即可，名稱為 NewsChannel
 import '../services/database_service.dart';
 import '../data/channels_data.dart';
 
 // 狀態類別：管理頻道的 CRUD 邏輯
 class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
+  // 1. 【修正點 2】：將內部變數名稱由 dbService 改為 _databaseService，以便在 updateChannel 中使用
+  final DatabaseService _databaseService = DatabaseService();
+
+  // 【修正點 3】：確保構造函數使用正確的變數
   ChannelNotifier() : super([]);
 
-  final dbService = DatabaseService();
+  // ----------------------------------------------------
+  // Helper 函數：在內部使用排序邏輯
+  // ----------------------------------------------------
+  void _sortChannels() {
+    state.sort(
+      (a, b) => (a.channelOrder ?? 999).compareTo(b.channelOrder ?? 999),
+    );
+  }
 
   // 初始化：從資料庫加載頻道，如果資料庫為空，則載入靜態預設列表
   Future<void> loadChannels() async {
-    List<NewsChannel> channels = await dbService.getAllChannelsForManagement();
+    List<NewsChannel> channels = await _databaseService
+        .getAllChannelsForManagement();
 
     // 如果資料庫中沒有任何頻道，則插入預設列表
     if (channels.isEmpty) {
       await _insertDefaultChannels();
-      channels = await dbService.getAllChannelsForManagement();
+      channels = await _databaseService.getAllChannelsForManagement();
     }
 
-    // 按照 order 排序
-    channels.sort(
-      (a, b) => (a.channelOrder ?? 999).compareTo(b.channelOrder ?? 999),
-    );
+    // 呼叫內部排序
     state = channels;
+    _sortChannels();
   }
 
   // 輔助函數：將靜態預設頻道插入資料庫
@@ -32,14 +44,16 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
     // defaultChannels 來自 channels_data.dart
     for (int i = 0; i < defaultChannels.length; i++) {
       // 插入時，設定 channelOrder
-      await dbService.insertChannel(defaultChannels[i]);
+      await _databaseService.insertChannel(
+        defaultChannels[i].copyWith(channelOrder: i),
+      );
     }
   }
 
   // U - 刪除頻道
   Future<void> deleteChannel(NewsChannel channel) async {
     if (channel.id == null) return;
-    await dbService.deleteChannel(channel.id!);
+    await _databaseService.deleteChannel(channel.id!);
     // 更新狀態 (從列表中移除)
     state = state.where((c) => c.id != channel.id).toList();
   }
@@ -47,7 +61,7 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
   // U - 切換隱藏/顯示狀態
   Future<void> toggleHidden(NewsChannel channel) async {
     final updatedChannel = channel.copyWith(isHidden: !channel.isHidden);
-    await dbService.updateChannel(updatedChannel);
+    await _databaseService.updateChannel(updatedChannel);
 
     // 更新狀態 (替換列表中的物件)
     state = [
@@ -73,22 +87,38 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
       // 只有當 order 發生變化時才寫入，這裡簡化為全部寫入
       channelsToUpdate.add(updatedList[i].copyWith(channelOrder: i));
     }
-    await dbService.updateChannelOrder(channelsToUpdate);
+    await _databaseService.updateChannelOrder(channelsToUpdate);
   }
 
-  // 【新增：實現 addChannel 方法，並修正型別為 NewsChannel】
+  // C - 新增頻道 (維持您的邏輯，並修正 dbService 名稱)
   Future<void> addChannel(NewsChannel newChannel) async {
     // 1. 設定新頻道的 order (放在列表末尾)
     final channelOrder = state.length;
-    // 由於 newChannel 可能沒有 ID，這裡先設定 order，ID 交給 dbService.insertChannel 處理
     final channelToInsert = newChannel.copyWith(channelOrder: channelOrder);
 
     // 2. 將新頻道寫入資料庫
-    // 假設 dbService.insertChannel 會返回或確保新的 channel 有 ID
-    await dbService.insertChannel(channelToInsert);
+    await _databaseService.insertChannel(channelToInsert);
 
     // 3. 重新載入所有頻道，以確保 UI 和數據庫同步
+    // 雖然可以直接更新 state，但重新載入可以確保新 ID 被賦予
     await loadChannels();
+  }
+
+  // ----------------------------------------------------
+  // 【關鍵新增點】: U - 實現更新頻道功能 (修正了型別和變數名稱)
+  // ----------------------------------------------------
+  Future<void> updateChannel(NewsChannel updatedChannel) async {
+    // 1. 更新資料庫
+    await _databaseService.updateChannel(updatedChannel);
+
+    // 2. 更新 Riverpod 狀態
+    state = [
+      for (final channel in state)
+        if (channel.id == updatedChannel.id) updatedChannel else channel,
+    ];
+
+    // (可選) 重新排序，確保順序正確
+    _sortChannels();
   }
 
   // ----------------------------------------------------
@@ -99,7 +129,7 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
       return 0;
     }
 
-    final addedCount = await dbService.insertNewChannels(newChannels);
+    final addedCount = await _databaseService.insertNewChannels(newChannels);
 
     // 重新載入狀態，通知所有監聽者更新 UI
     await loadChannels();
@@ -112,7 +142,7 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
   // ----------------------------------------------------
   Future<void> resetChannels() async {
     // 1. 清空所有現有頻道
-    await dbService.deleteAllChannels();
+    await _databaseService.deleteAllChannels();
 
     // 2. 插入預設的頻道列表
     await _insertDefaultChannels();
@@ -128,14 +158,16 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
   // R - 接收匯入的頻道列表，清空舊資料庫並設定為新的狀態
   Future<void> setChannels(List<NewsChannel> newChannels) async {
     // 1. 清空舊資料庫 (確保匯入是乾淨的覆蓋)
-    await dbService.deleteAllChannels();
+    await _databaseService.deleteAllChannels();
 
     // 2. 批量插入新的頻道
     int order = 0;
     for (final channel in newChannels) {
       // 使用匯入時提供的 channelOrder，如果沒有則使用遞增的 order
       final finalOrder = channel.channelOrder ?? order;
-      await dbService.insertChannel(channel.copyWith(channelOrder: finalOrder));
+      await _databaseService.insertChannel(
+        channel.copyWith(channelOrder: finalOrder),
+      );
       order = finalOrder;
     }
 
