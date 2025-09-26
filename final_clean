@@ -1,0 +1,5 @@
+flutter clean
+rm -rf ~/.gradle/caches/
+rm -rf ~/.gradle/wrapper/dists/
+rm -rf android/.gradle/
+flutter pub get
