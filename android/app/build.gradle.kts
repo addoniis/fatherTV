@@ -39,16 +39,31 @@ compileOptions {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
-
     buildTypes {
-        release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
-        }
-    }
-}
+    release {
+        // TODO: Add your own signing config for the release build.
+        // Signing with the debug keys for now, so `flutter run --release` works.
+        signingConfig = signingConfigs.getByName("debug")
 
+        // 【修正 1】：將 minifyEnabled 移入區塊內
+        // 【修正 2】：將 minifyEnabled 替換為 isMinifyEnabled (Kotlin DSL 正確名稱)
+        isMinifyEnabled = false // <--- 修正後的關鍵行
+
+        // 【新增關鍵行】：關閉資源縮減
+        isShrinkResources = false // <--- 修正這個錯誤
+
+        // 確保 ProGuard 文件設定為空，以防止誤讀 (此行保持在區塊內)
+        proguardFiles(
+            getDefaultProguardFile("proguard-android-optimize.txt"),
+            "proguard-rules.pro"
+        )
+    }
+    // 如果您需要確保 debug 也沒有混淆 (通常不用，但安全起見可以檢查)
+    // debug {
+    //     isMinifyEnabled = false // 預設就是 false
+    // }
+  }
+}
 
 
 flutter {
