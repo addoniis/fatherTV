@@ -1,17 +1,15 @@
 // lib/providers/channel_provider.dart
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// import 'package:news_stream_app/models/channel.dart' as models; // <--- 移除衝突的 as models 導入
-import '../models/channel.dart'; // <--- 使用此行即可，名稱為 NewsChannel
+import '../models/channel.dart';
 import '../services/database_service.dart';
 import '../data/channels_data.dart';
 
 // 狀態類別：管理頻道的 CRUD 邏輯
 class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
-  // 1. 【修正點 2】：將內部變數名稱由 dbService 改為 _databaseService，以便在 updateChannel 中使用
+  // 假設 DatabaseService 已經存在並可以執行批量更新
   final DatabaseService _databaseService = DatabaseService();
 
-  // 【修正點 3】：確保構造函數使用正確的變數
   ChannelNotifier() : super([]);
 
   // ----------------------------------------------------
@@ -22,6 +20,72 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
       (a, b) => (a.channelOrder ?? 999).compareTo(b.channelOrder ?? 999),
     );
   }
+
+  // ----------------------------------------------------
+  // 【新增功能】：手勢切換頻道邏輯 (PlayerPage 呼叫)
+  // ----------------------------------------------------
+  NewsChannel? selectRelativeChannel(NewsChannel currentChannel, int offset) {
+    final allChannels = state;
+
+    // 1. 過濾出所有可見的頻道 (非隱藏)
+    final visibleChannels = allChannels.where((c) => !c.isHidden).toList();
+
+    if (visibleChannels.isEmpty) {
+      return null; // 如果沒有可見頻道，則返回 null
+    }
+
+    // 2. 找到當前頻道在可見列表中的索引
+    int currentIndex = visibleChannels.indexWhere(
+      (c) => c.id == currentChannel.id,
+    );
+
+    if (currentIndex == -1) {
+      // 如果當前頻道不在可見列表中，預設從第一個開始
+      currentIndex = 0;
+    }
+
+    // 3. 計算新的索引，並處理循環 (Wrap-around)
+    int newIndex = currentIndex + offset;
+    final totalCount = visibleChannels.length;
+
+    // 確保索引在 0 到 totalCount-1 之間循環
+    if (newIndex >= totalCount) {
+      newIndex = 0; // 循環到第一個
+    } else if (newIndex < 0) {
+      newIndex = totalCount - 1; // 循環到最後一個
+    }
+
+    // 4. 返回新的頻道物件
+    return visibleChannels[newIndex];
+  }
+
+  // ----------------------------------------------------
+  // ❗ 批量管理功能 (新增) ❗
+  // ----------------------------------------------------
+
+  // U - 批量隱藏所有頻道
+  Future<void> hideAllChannels() async {
+    // 1. 批量更新資料庫 (需要 DatabaseService 支援此方法)
+    // 假設 DatabaseService 有一個方法來更新所有頻道的 isHidden 狀態
+    // 如果您需要 DatabaseService 的實作細節，請告知
+    await _databaseService.updateAllChannelsVisibility(isHidden: true);
+
+    // 2. 更新 Riverpod 狀態
+    state = [for (final channel in state) channel.copyWith(isHidden: true)];
+  }
+
+  // U - 批量顯示所有頻道
+  Future<void> showAllChannels() async {
+    // 1. 批量更新資料庫
+    await _databaseService.updateAllChannelsVisibility(isHidden: false);
+
+    // 2. 更新 Riverpod 狀態
+    state = [for (final channel in state) channel.copyWith(isHidden: false)];
+  }
+
+  // ----------------------------------------------------
+  // 以下是您原有的 CRUD 邏輯...
+  // ----------------------------------------------------
 
   // 初始化：從資料庫加載頻道，如果資料庫為空，則載入靜態預設列表
   Future<void> loadChannels() async {
@@ -90,7 +154,7 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
     await _databaseService.updateChannelOrder(channelsToUpdate);
   }
 
-  // C - 新增頻道 (維持您的邏輯，並修正 dbService 名稱)
+  // C - 新增頻道
   Future<void> addChannel(NewsChannel newChannel) async {
     // 1. 設定新頻道的 order (放在列表末尾)
     final channelOrder = state.length;
@@ -100,13 +164,10 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
     await _databaseService.insertChannel(channelToInsert);
 
     // 3. 重新載入所有頻道，以確保 UI 和數據庫同步
-    // 雖然可以直接更新 state，但重新載入可以確保新 ID 被賦予
     await loadChannels();
   }
 
-  // ----------------------------------------------------
-  // 【關鍵新增點】: U - 實現更新頻道功能 (修正了型別和變數名稱)
-  // ----------------------------------------------------
+  // U - 實現更新頻道功能
   Future<void> updateChannel(NewsChannel updatedChannel) async {
     // 1. 更新資料庫
     await _databaseService.updateChannel(updatedChannel);
@@ -121,9 +182,7 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
     _sortChannels();
   }
 
-  // ----------------------------------------------------
-  // 【新增功能：合併新增頻道列表】
-  // ----------------------------------------------------
+  // 合併新增頻道列表
   Future<int> mergeChannels(List<NewsChannel> newChannels) async {
     if (newChannels.isEmpty) {
       return 0;
@@ -137,9 +196,7 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
     return addedCount;
   }
 
-  // ----------------------------------------------------
-  // 【新增功能：將頻道列表重置為預設狀態】
-  // ----------------------------------------------------
+  // 將頻道列表重置為預設狀態
   Future<void> resetChannels() async {
     // 1. 清空所有現有頻道
     await _databaseService.deleteAllChannels();
@@ -151,11 +208,7 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
     await loadChannels();
   }
 
-  // ----------------------------------------------------
-  // 【新增功能：用於 JSON 備份/匯入 - setChannels 方法】
-  // ----------------------------------------------------
-
-  // R - 接收匯入的頻道列表，清空舊資料庫並設定為新的狀態
+  // 用於 JSON 備份/匯入 - setChannels 方法
   Future<void> setChannels(List<NewsChannel> newChannels) async {
     // 1. 清空舊資料庫 (確保匯入是乾淨的覆蓋)
     await _databaseService.deleteAllChannels();
@@ -184,8 +237,23 @@ final channelListProvider =
       return notifier;
     });
 
-// 篩選出顯示的頻道列表 (用於主播放列表)
+// -----------------------------------------------------------------
+// 針對「顯示/隱藏所有頻道」功能的新增與修改
+// -----------------------------------------------------------------
+
+// 1. 新增 StateProvider：追蹤是否強制顯示所有頻道 (包含隱藏的)
+final showAllChannelsProvider = StateProvider<bool>((ref) => false);
+
+// 2. 修改 visibleChannelListProvider 的邏輯
 final visibleChannelListProvider = Provider<List<NewsChannel>>((ref) {
   final allChannels = ref.watch(channelListProvider);
-  return allChannels.where((c) => !c.isHidden).toList();
+  final showAll = ref.watch(showAllChannelsProvider); // 監聽新的狀態
+
+  if (showAll) {
+    // 如果 showAll 為 true，則回傳所有頻道 (無論 isHidden 狀態)
+    return allChannels;
+  } else {
+    // 否則，只回傳 isHidden = false 的頻道
+    return allChannels.where((c) => !c.isHidden).toList();
+  }
 });

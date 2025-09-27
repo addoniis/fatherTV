@@ -39,23 +39,68 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
     super.dispose();
   }
 
+  // =======================================================
+  // ❗ 修正：新增增強的 URL 解析方法 ❗
+  // =======================================================
+  String? _parseYoutubeId(String rawInput) {
+    rawInput = rawInput.trim();
+
+    // 1. 優先使用 youtube_player_flutter 的方法 (處理 watch?v= 和 youtu.be/ 短連結)
+    String? id = YoutubePlayer.convertUrlToId(rawInput);
+    if (id != null && id.isNotEmpty) {
+      return id;
+    }
+
+    // 2. 處理 /live/ID 或 /embed/ID 格式
+    final uri = Uri.tryParse(rawInput);
+
+    // 確保是有效的 YouTube URI
+    if (uri != null &&
+        (uri.host.contains('youtube.com') || uri.host.contains('youtu.be'))) {
+      final pathSegments = uri.pathSegments;
+
+      // 檢查路徑段，處理 /live/ID 或 /embed/ID 格式
+      if (pathSegments.length >= 1) {
+        // 檢查第一個路徑段是否是 'live' 或 'embed'
+        if (pathSegments[0] == 'live' || pathSegments[0] == 'embed') {
+          // ID 應該是第二個路徑段
+          if (pathSegments.length >= 2) {
+            // 返回 ID 並排除後面的查詢參數 (如 ?si=...)
+            return pathSegments[1].split('?').first;
+          }
+        }
+      }
+    }
+
+    // 3. 如果以上解析都失敗，假設輸入就是一個裸 ID (例如手動輸入的 ID)
+    // 進行簡單的 ID 格式檢查 (YouTube ID 約 11 字元)
+    if (rawInput.length >= 5 &&
+        rawInput.length <= 15 &&
+        !rawInput.contains(' ')) {
+      return rawInput;
+    }
+
+    return null;
+  }
+  // =======================================================
+
   void _saveChannel() async {
     // 1. 驗證表單
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    // ============== 修正點：在這裡定義所有區域變數 ==============
+    // ============== 修正點：在這裡使用新的解析方法 ==============
     final name = _nameController.text.trim();
     final rawInput = _urlController.text.trim();
 
-    // 2. 解析 YouTube ID
-    String? videoId = YoutubePlayer.convertUrlToId(rawInput) ?? rawInput;
+    // 2. 解析 YouTube ID (使用增強的解析邏輯)
+    String? videoId = _parseYoutubeId(rawInput);
 
     if (videoId == null || videoId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('無效的 YouTube ID 或網址'),
+          content: Text('無效的 YouTube ID、網址或格式不支援'),
           backgroundColor: Colors.red,
         ),
       );
@@ -76,6 +121,7 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
       final isDuplicate = allChannels.any(
         (c) => c.videoId == videoId && c.id != existingChannelId,
       );
+      // ... (後續編輯邏輯保持不變)
 
       if (isDuplicate) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -104,6 +150,7 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
 
       // 檢查 ID 是否重複
       final isDuplicate = allChannels.any((c) => c.videoId == videoId);
+      // ... (後續新增邏輯保持不變)
 
       if (isDuplicate) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -181,7 +228,8 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
                 style: const TextStyle(color: Colors.white),
                 decoration: const InputDecoration(
                   labelText: 'YouTube 直播網址或頻道 ID',
-                  hintText: '請貼上如 "https://www.youtube.com/watch?v=..." 的網址',
+                  // 提示更全面
+                  hintText: '貼上網址 (watch?v=, live/, youtu.be/) 或影片/頻道 ID',
                   border: OutlineInputBorder(),
                   labelStyle: TextStyle(color: Colors.white70),
                 ),
@@ -189,12 +237,11 @@ class _AddChannelPageState extends ConsumerState<AddChannelPage> {
                   if (value == null || value.isEmpty) {
                     return '請輸入有效的 YouTube 網址或 ID';
                   }
-                  // 簡單檢查是否能解析出 ID
-                  String? videoId =
-                      YoutubePlayer.convertUrlToId(value.trim()) ??
-                      value.trim();
-                  if (videoId.isEmpty) {
-                    return '無法從輸入解析出有效的 YouTube ID';
+                  // ❗ 修正：使用增強的解析方法來驗證 ❗
+                  String? videoId = _parseYoutubeId(value.trim());
+
+                  if (videoId == null || videoId.isEmpty) {
+                    return '無法從輸入解析出有效的 YouTube ID。請檢查格式。';
                   }
                   return null;
                 },

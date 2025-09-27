@@ -30,7 +30,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
   # 加入 YouTube 播放器套件
   youtube_player_flutter: ^9.1.2 # 請注意版本號，建議使用最新穩定版
 
@@ -68,7 +67,11 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
-
+  assets:
+    # ❗ 修正：現在直接指向根目錄下的 FAQ.md ❗
+    - FAQ.txt
+    - changelog.txt
+  # ... 其他可能存在的資產路徑
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

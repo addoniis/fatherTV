@@ -6,7 +6,9 @@ plugins {
 }
 
 android {
+    //namespace = "com.adonis.fathertv_app"
     namespace = "com.example.news_stream_app"
+
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 

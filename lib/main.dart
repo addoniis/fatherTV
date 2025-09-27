@@ -1,13 +1,14 @@
 // lib/main.dart
 
-import 'dart:async'; // 引入 Timer 類
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter/services.dart'; // 引入 System 服務
+import 'package:flutter/services.dart';
 
 // 引入我們為數據持久化建立的組件
-import 'models/channel.dart';
+import 'models/channel.dart'; // 引入 NewsChannel
 import 'providers/channel_provider.dart';
 // 這裡引入了 ChannelManagementPage，雖然沒有在主頁面使用，但設定頁面可能會使用
 import 'pages/channel_management_page.dart';
@@ -46,15 +47,76 @@ class MyApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: Colors.black, // 設定深色背景
       ),
-      // 使用 ChannelListPage，現在它是一個 ConsumerWidget
+      // 使用 ChannelListPage，現在它是一個 ConsumerStatefulWidget
       home: const ChannelListPage(),
     );
   }
 }
 
-// 主頁：頻道列表 (改為 ConsumerWidget 以監聽 Riverpod 狀態)
-class ChannelListPage extends ConsumerWidget {
+// 修正：ChannelListPage 升級為 ConsumerStatefulWidget
+class ChannelListPage extends ConsumerStatefulWidget {
   const ChannelListPage({super.key});
+
+  @override
+  ConsumerState<ChannelListPage> createState() => _ChannelListPageState();
+}
+
+// 新增：State類，並混合 WidgetsBindingObserver
+class _ChannelListPageState extends ConsumerState<ChannelListPage>
+    with WidgetsBindingObserver {
+  // 追蹤 App 是否是第一次啟動 (用來避免在 initState 和 didChangeDependencies 重複鎖定)
+  bool _isInitialStart = true;
+
+  @override
+  void initState() {
+    super.initState();
+    // 啟動生命週期監聽
+    WidgetsBinding.instance.addObserver(this);
+    // 首次啟動時鎖定
+    _lockToLandscape();
+  }
+
+  // ❗ 關鍵修正：從 PlayerPage 返回時會觸發此方法 ❗
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    if (!_isInitialStart) {
+      // 🚨 終極延遲鎖定：給系統 50 毫秒時間完成 PlayerPage 的銷毀 🚨
+      Future.delayed(const Duration(milliseconds: 50), () {
+        // 確保 Widget 仍然在畫面上 (mounted)，才執行鎖定
+        if (mounted) {
+          _lockToLandscape();
+        }
+      });
+    }
+    // 標記為非首次啟動
+    _isInitialStart = false;
+  }
+
+  // 當 App 從背景或直屏頁面 (Settings) 返回時會觸發
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // 每次應用程式恢復時，強制鎖定橫屏
+      _lockToLandscape();
+    }
+  }
+
+  // 輔助函式：強制鎖定為橫屏
+  void _lockToLandscape() {
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  @override
+  void dispose() {
+    // 移除生命週期監聽，避免記憶體洩漏
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
 
   // 導航到設定頁面的函式，避免重複程式碼
   void _navigateToSettings(BuildContext context) {
@@ -64,10 +126,29 @@ class ChannelListPage extends ConsumerWidget {
     );
   }
 
+  // 處理頻道顯示切換
+  void _toggleChannelVisibility(BuildContext context) {
+    // 使用 ref.read 存取狀態
+    final currentStatus = ref.read(showAllChannelsProvider);
+    // 切換狀態
+    ref.read(showAllChannelsProvider.notifier).state = !currentStatus;
+
+    // 提示用戶狀態已切換
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(!currentStatus ? '已顯示所有頻道 (包含隱藏)' : '已隱藏設定中隱藏的頻道'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     // 監聽 "可見" 的頻道列表
     final channels = ref.watch(visibleChannelListProvider);
+
+    // 監聽切換按鈕的狀態
+    final isShowingAll = ref.watch(showAllChannelsProvider);
 
     // 處理初始化載入中狀態
     if (channels.isEmpty &&
@@ -77,6 +158,7 @@ class ChannelListPage extends ConsumerWidget {
           title: const Text('新聞直播頻道列表'),
           backgroundColor: Colors.black,
           actions: [
+            // 由於是初始載入中，這裡的眼睛按鈕不顯示或保持預設狀態
             IconButton(
               icon: const Icon(Icons.settings, size: 36.0),
               onPressed: () => _navigateToSettings(context),
@@ -91,12 +173,26 @@ class ChannelListPage extends ConsumerWidget {
 
     // 處理列表為空（已載入完畢，但沒有頻道）的狀態
     if (channels.isEmpty &&
-        ref.read(channelListProvider.notifier).state.isNotEmpty) {
+        ref.read(channelListProvider.notifier).state.isNotEmpty &&
+        !isShowingAll) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('新聞直播頻道列表'),
           backgroundColor: Colors.black,
           actions: [
+            // 處理空狀態時的「顯示全部」按鈕
+            Padding(
+              padding: const EdgeInsets.only(right: 12.0),
+              child: IconButton(
+                icon: Icon(
+                  isShowingAll ? Icons.visibility : Icons.visibility_off,
+                  size: 36.0,
+                  color: isShowingAll ? Colors.redAccent : Colors.white,
+                ),
+                onPressed: () => _toggleChannelVisibility(context),
+              ),
+            ),
+
             IconButton(
               icon: const Icon(Icons.settings, size: 36.0),
               onPressed: () => _navigateToSettings(context),
@@ -129,7 +225,7 @@ class ChannelListPage extends ConsumerWidget {
                 ),
                 const SizedBox(height: 10),
                 const Text(
-                  '請點擊右上角的設定按鈕，進入「頻道管理」頁面新增或顯示頻道。',
+                  '請點擊右上角的設定按鈕，進入「頻道管理」頁面新增或顯示頻道，或點擊眼睛圖示顯示隱藏頻道。',
                   style: TextStyle(color: Colors.grey, fontSize: 18),
                   textAlign: TextAlign.center,
                 ),
@@ -160,25 +256,35 @@ class ChannelListPage extends ConsumerWidget {
         title: const Text('阿爸的電視'),
         backgroundColor: Colors.black,
         actions: [
-          // 1. 設定按鈕 - 放大點擊範圍和圖標
+          // ❗ 1. 新增：顯示/隱藏所有頻道按鈕 (眼睛圖示) ❗
           Padding(
-            padding: const EdgeInsets.only(right: 12.0), // ⬅ 新增右邊距 12.0 像素
+            padding: const EdgeInsets.only(right: 12.0),
             child: IconButton(
-              icon: const Icon(
-                Icons.settings,
-                size: 36.0, // ⬅ 放大設定圖標
+              icon: Icon(
+                // 根據狀態切換圖示：顯示全部時為睜開眼，否則為閉上眼
+                isShowingAll ? Icons.visibility : Icons.visibility_off,
+                size: 36.0,
+                color: isShowingAll
+                    ? Colors.redAccent
+                    : Colors.white, // 給予切換時不同的顏色提示
               ),
+              onPressed: () => _toggleChannelVisibility(context),
+            ),
+          ),
+
+          // 2. 設定按鈕 - 放大點擊範圍和圖標
+          Padding(
+            padding: const EdgeInsets.only(right: 12.0),
+            child: IconButton(
+              icon: const Icon(Icons.settings, size: 36.0),
               onPressed: () => _navigateToSettings(context),
             ),
           ),
-          // 2. 橫向時常有的返回 App 退出按鈕 - 放大點擊範圍和圖標
+          // 3. 橫向時常有的返回 App 退出按鈕 - 放大點擊範圍和圖標
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 30.0),
             child: IconButton(
-              icon: const Icon(
-                Icons.exit_to_app,
-                size: 36.0, // ⬅ 放大退出圖標
-              ),
+              icon: const Icon(Icons.exit_to_app, size: 36.0),
               onPressed: () => SystemNavigator.pop(),
             ),
           ),
@@ -204,9 +310,13 @@ class ChannelListPage extends ConsumerWidget {
           final thumbnailUrl =
               'https://img.youtube.com/vi/${channel.videoId}/hqdefault.jpg';
 
+          // 檢查是否為被隱藏的頻道，且當前為「顯示全部」模式
+          final isHiddenAndShowingAll = isShowingAll && channel.isHidden;
+
           return InkWell(
             onTap: () {
               // 點擊後導航到播放器頁面
+              // 備註：點擊隱藏的頻道也會播放，因為它已經在 `channels` 列表中。
               Navigator.push(
                 context,
                 MaterialPageRoute(
@@ -222,7 +332,7 @@ class ChannelListPage extends ConsumerWidget {
                   child: Container(
                     decoration: BoxDecoration(
                       color: Colors.black, // 背景色，用於圖片載入失敗時
-                      borderRadius: BorderRadius.circular(8.0),
+                      borderRadius: BorderRadius.circular(25.0),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.5),
@@ -233,9 +343,10 @@ class ChannelListPage extends ConsumerWidget {
                       ],
                     ),
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(8.0),
+                      borderRadius: BorderRadius.circular(25.0),
                       child: Stack(
-                        fit: StackFit.expand, // 讓 Stack 充滿父容器
+                        // 【修正 1】: 將 BoxFit.expand 修正為 StackFit.expand
+                        fit: StackFit.expand,
                         children: [
                           // 【縮圖圖片】
                           Image.network(
@@ -253,29 +364,18 @@ class ChannelListPage extends ConsumerWidget {
                             },
                           ),
 
-                          // 模擬 LIVE 標籤 (位於卡片右上方) - 保留
-                          Positioned(
-                            top: 10,
-                            right: 10,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.redAccent,
-                                borderRadius: BorderRadius.circular(4),
-                              ),
-                              child: const Text(
-                                'LIVE',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
+                          // ❗ 新增：如果頻道是被隱藏的，顯示一個半透明圖層 ❗
+                          if (isHiddenAndShowingAll)
+                            Container(
+                              color: Colors.black.withOpacity(0.6),
+                              child: const Center(
+                                child: Icon(
+                                  Icons.visibility_off,
+                                  color: Colors.white70,
+                                  size: 40,
                                 ),
                               ),
                             ),
-                          ),
                         ],
                       ),
                     ),
@@ -294,8 +394,9 @@ class ChannelListPage extends ConsumerWidget {
                   child: Text(
                     channel.name,
                     textAlign: TextAlign.center, // 讓名稱置中
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      // ❗ 根據狀態改變文字顏色 ❗
+                      color: isHiddenAndShowingAll ? Colors.grey : Colors.white,
                       fontSize: 14, //頻道名稱文字的大小 Adonis
                       fontWeight: FontWeight.bold,
                     ),
@@ -312,16 +413,16 @@ class ChannelListPage extends ConsumerWidget {
   }
 }
 
-// 播放器頁面 (已修正為單按鈕鎖定/解鎖，並確保按鈕顯示)
-class PlayerPage extends StatefulWidget {
+// 播放器頁面 (已包含防止手勢切換時方向錯亂的加固邏輯)
+class PlayerPage extends ConsumerStatefulWidget {
   final NewsChannel channel;
   const PlayerPage({super.key, required this.channel});
 
   @override
-  State<PlayerPage> createState() => _PlayerPageState();
+  ConsumerState<PlayerPage> createState() => _PlayerPageState();
 }
 
-class _PlayerPageState extends State<PlayerPage> {
+class _PlayerPageState extends ConsumerState<PlayerPage> {
   late YoutubePlayerController _controller;
   // 追蹤螢幕是否鎖定
   bool _isLocked = false;
@@ -329,19 +430,13 @@ class _PlayerPageState extends State<PlayerPage> {
   bool _showLockOverlay = false;
   // 【新增】: 用於計時器
   Timer? _lockOverlayTimer;
+  // 追蹤垂直拖曳的總距離
+  double _dragDistance = 0.0;
 
   @override
   void initState() {
     super.initState();
-    _controller = YoutubePlayerController(
-      initialVideoId: widget.channel.videoId,
-      flags: const YoutubePlayerFlags(
-        autoPlay: true,
-        mute: false,
-        isLive: true,
-        forceHD: true,
-      ),
-    );
+    _initializePlayerController(widget.channel.videoId);
 
     // 播放器頁面強制鎖定為橫向
     SystemChrome.setPreferredOrientations([
@@ -351,6 +446,30 @@ class _PlayerPageState extends State<PlayerPage> {
 
     // 隱藏系統狀態列和導航列 (讓畫面最大化)
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.manual, overlays: []);
+  }
+
+  // 輔助方法：初始化或重新初始化播放器控制器
+  void _initializePlayerController(String videoId) {
+    _controller = YoutubePlayerController(
+      initialVideoId: videoId,
+      flags: const YoutubePlayerFlags(
+        autoPlay: true,
+        mute: false,
+        isLive: true,
+        forceHD: true,
+      ),
+    )..addListener(_listener); // ❗ 關鍵：添加播放器狀態監聽 ❗
+  }
+
+  // ❗ 新增播放器狀態監聽器，加固橫屏鎖定 ❗
+  void _listener() {
+    // 當播放器準備好時 (例如切換頻道後)，強制重新執行橫屏鎖定。
+    if (_controller.value.isReady) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
   }
 
   // 鎖定/解鎖操作
@@ -364,9 +483,7 @@ class _PlayerPageState extends State<PlayerPage> {
       setState(() {
         _showLockOverlay = true;
       });
-      // 取消舊的計時器 (如果存在)
       _lockOverlayTimer?.cancel();
-      // 啟動新的 5 秒計時器
       _lockOverlayTimer = Timer(const Duration(seconds: 5), () {
         if (mounted) {
           setState(() {
@@ -382,7 +499,6 @@ class _PlayerPageState extends State<PlayerPage> {
       });
     }
 
-    // 提供視覺回饋 (可選，Snackbar 可能會與全螢幕體驗衝突，但暫時保留)
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(_isLocked ? '螢幕已鎖定' : '螢幕已解鎖'),
@@ -391,121 +507,165 @@ class _PlayerPageState extends State<PlayerPage> {
     );
   }
 
+  // 處理拖曳開始
+  void _handleDragStart(DragStartDetails details) {
+    _dragDistance = 0.0; // 拖曳開始時重置距離
+  }
+
+  // 處理拖曳更新（累積距離）
+  void _handleDragUpdate(DragUpdateDetails details) {
+    // 累積垂直移動的距離 (details.delta.dy)
+    _dragDistance += details.delta.dy;
+  }
+
+  // 處理手勢切換頻道 (現在使用累積距離判斷)
+  void _handleChannelSwipe(DragEndDetails details) {
+    // 設置一個距離閾值，例如：垂直移動超過 100 像素
+    const double distanceThreshold = 100.0;
+
+    if (_dragDistance.abs() > distanceThreshold) {
+      final notifier = ref.read(channelListProvider.notifier);
+      NewsChannel? newChannel;
+      int offset;
+
+      // 如果 _dragDistance 是負值 (向上滑動，Y軸減少)
+      if (_dragDistance < 0) {
+        offset = 1; // 下一個頻道
+      }
+      // 如果 _dragDistance 是正值 (向下滑動，Y軸增加)
+      else {
+        offset = -1; // 上一個頻道
+      }
+
+      newChannel = notifier.selectRelativeChannel(widget.channel, offset);
+
+      // 檢查 newChannel 不為 null 且 ID 不同才進行導航
+      if (newChannel != null && newChannel.id != widget.channel.id) {
+        // 使用 pushReplacement 替換當前的 PlayerPage，以實現無縫切換
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            // 使用 newChannel! 斷言其不為 null
+            builder: (context) => PlayerPage(channel: newChannel!),
+          ),
+        );
+      }
+    }
+
+    // 拖曳結束後重置距離，準備下一次拖曳
+    _dragDistance = 0.0;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
 
-      // 使用 Stack 堆疊影片、鎖定層和控制按鈕
-      body: Stack(
-        children: [
-          // 1. 影片播放器 (被 IgnorePointer 包裹，實現鎖定效果)
-          Positioned.fill(
-            child: IgnorePointer(
-              // 【關鍵】: 只有在鎖定狀態下，才忽略對播放器的觸控
-              ignoring: _isLocked,
-              child: YoutubePlayer(
-                controller: _controller,
-                showVideoProgressIndicator: true,
-                progressIndicatorColor: Colors.redAccent,
-                onReady: () {
-                  debugPrint('Player is ready.');
-                },
+      // 【核心修改】：使用 GestureDetector 包裹整個頁面內容
+      body: GestureDetector(
+        onVerticalDragStart: _handleDragStart, // 綁定拖曳開始
+        onVerticalDragUpdate: _handleDragUpdate, // 綁定拖曳更新
+        onVerticalDragEnd: _handleChannelSwipe, // 綁定拖曳結束
+        // 使用 Stack 堆疊影片、鎖定層和控制按鈕
+        child: Stack(
+          children: [
+            // 1. 影片播放器 (被 IgnorePointer 包裹，實現鎖定效果)
+            Positioned.fill(
+              child: IgnorePointer(
+                // 【關鍵】: 只有在鎖定狀態下，才忽略對播放器的觸控
+                ignoring: _isLocked,
+                child: YoutubePlayer(
+                  controller: _controller,
+                  showVideoProgressIndicator: true,
+                  progressIndicatorColor: Colors.redAccent,
+                  onReady: () {},
+                ),
               ),
             ),
-          ),
 
-          // 2. 鎖定時的浮層 (只在鎖定 AND 顯示狀態為 true 時才顯示)
-          if (_isLocked && _showLockOverlay)
-            Positioned.fill(
-              // 透過 GestureDetector 確保即使在浮層上點擊也不會影響鎖定狀態
-              child: GestureDetector(
-                // 點擊浮層時，可以再次顯示鎖定提示 (如果需要)
-                onTap: () {
-                  if (_isLocked && !_showLockOverlay) {
-                    _toggleLock(); // 重新觸發一次，但馬上解鎖
-                    // 這裡的邏輯是確保點擊螢幕時，如果已經鎖定，則重新顯示提示
-                    // 但由於 _toggleLock 已經包含了 Timer 邏輯，
-                    // 為了簡單化，我們可以讓點擊浮層時只重置 Timer
-                    if (_lockOverlayTimer?.isActive == true) {
+            // 2. 鎖定時的浮層 (只在鎖定 AND 顯示狀態為 true 時才顯示)
+            if (_isLocked && _showLockOverlay)
+              Positioned.fill(
+                child: GestureDetector(
+                  // 點擊浮層時，重新啟動計時器 (讓鎖定提示再顯示 5 秒)
+                  onTap: () {
+                    if (_isLocked) {
                       _lockOverlayTimer?.cancel();
+                      setState(() {
+                        _showLockOverlay = true;
+                      });
+                      _lockOverlayTimer = Timer(const Duration(seconds: 5), () {
+                        if (mounted) {
+                          setState(() {
+                            _showLockOverlay = false;
+                          });
+                        }
+                      });
                     }
-                    setState(() {
-                      _showLockOverlay = true;
-                    });
-                    _lockOverlayTimer = Timer(const Duration(seconds: 5), () {
-                      if (mounted) {
-                        setState(() {
-                          _showLockOverlay = false;
-                        });
-                      }
-                    });
-                  }
-                },
-                child: Container(
-                  // 半透明遮罩
-                  //color: Colors.black.withOpacity(0.5),
-                  color: const Color.fromRGBO(0, 0, 0, 0.5),
-                  child: const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.lock, color: Colors.white, size: 80),
-                        SizedBox(height: 10),
-                        Text(
-                          '螢幕已鎖定',
-                          style: TextStyle(color: Colors.white, fontSize: 24),
-                        ),
-                      ],
+                  },
+                  child: Container(
+                    color: const Color.fromRGBO(0, 0, 0, 0.5),
+                    child: const Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // 【修正】: Icon, SizedBox, Text 必須是 const
+                          Icon(Icons.lock, color: Colors.white, size: 80),
+                          SizedBox(height: 10),
+                          Text(
+                            '螢幕已鎖定',
+                            style: TextStyle(color: Colors.white, fontSize: 24),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
 
-          // 3. 退出按鈕 (左上角) - 鎖定時隱藏
-          if (!_isLocked)
+            // 3. 退出按鈕 (左上角) - 鎖定時隱藏
+            if (!_isLocked)
+              Positioned(
+                top: 20,
+                left: 5,
+                child: SafeArea(
+                  child: IconButton(
+                    icon: const Icon(
+                      // 【修正】: 必須是 const
+                      Icons.arrow_back,
+                      color: Colors.white,
+                      size: 40,
+                    ),
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                    },
+                  ),
+                ),
+              ),
+
+            // 4. 鎖定/解鎖按鈕 (右上角) - 永遠可點擊，確保它在最上層
             Positioned(
               top: 20,
-              left: 20,
+              right: 20,
               child: SafeArea(
                 child: IconButton(
-                  icon: const Icon(
-                    Icons.arrow_back,
+                  // 鎖頭圖標根據狀態切換
+                  icon: Icon(
+                    _isLocked ? Icons.lock : Icons.lock_open,
                     color: Colors.white,
                     size: 40,
                   ),
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
+                  onPressed: _toggleLock, // 單擊即可切換鎖定/解鎖
                 ),
               ),
             ),
-
-          // 4. 鎖定/解鎖按鈕 (右上角) - 永遠可點擊，確保它在最上層
-          Positioned(
-            top: 20,
-            right: 20,
-            child: SafeArea(
-              child: IconButton(
-                // 鎖頭圖標根據狀態切換
-                icon: Icon(
-                  _isLocked ? Icons.lock : Icons.lock_open,
-                  color: Colors.white,
-                  size: 40,
-                ),
-                onPressed: _toggleLock, // 單擊即可切換鎖定/解鎖
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   @override
   void dispose() {
-    // 離開頁面前，取消計時器
     _lockOverlayTimer?.cancel();
 
     // 恢復系統狀態列
@@ -514,11 +674,15 @@ class _PlayerPageState extends State<PlayerPage> {
       overlays: SystemUiOverlay.values,
     );
 
-    // 離開播放器時，重新鎖定為橫向 (回到主頁的設定)
+    // 移除監聽器
+    _controller.removeListener(_listener);
+
+    // 關鍵修正：在退出播放器頁面時，強制維持橫向鎖定 (防止返回主頁時轉直屏)
     SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeLeft, // 允許橫向
       DeviceOrientation.landscapeRight,
     ]);
+
     _controller.dispose();
     super.dispose();
   }

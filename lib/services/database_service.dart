@@ -1,7 +1,7 @@
 // lib/services/database_service.dart
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import '../models/channel.dart';
+import '../models/channel.dart'; // 確保您已正確導入 NewsChannel
 
 class DatabaseService {
   static final DatabaseService _instance = DatabaseService._internal();
@@ -30,7 +30,7 @@ class DatabaseService {
             name TEXT,
             videoId TEXT,
             channelOrder INTEGER,
-            isHidden INTEGER DEFAULT 0
+            isHidden INTEGER DEFAULT 0  -- 0=顯示, 1=隱藏
           )
         ''');
       },
@@ -48,6 +48,7 @@ class DatabaseService {
     final maxOrder = maxOrderResult.first['MAX(channelOrder)'] as int? ?? 0;
     final finalOrder = channel.channelOrder ?? (maxOrder + 1);
 
+    // 假設 NewsChannel 有 toSqliteMap 方法接受 order 參數
     await db.insert(
       'channels',
       channel.toSqliteMap(finalOrder),
@@ -62,6 +63,7 @@ class DatabaseService {
       'channels',
       orderBy: 'channelOrder ASC',
     );
+    // 假設 NewsChannel 有 fromSqliteMap 靜態方法
     return List.generate(maps.length, (i) {
       return NewsChannel.fromSqliteMap(maps[i]);
     });
@@ -70,6 +72,7 @@ class DatabaseService {
   // U - 更新頻道 (用於 isHidden 和名稱/ID)
   Future<void> updateChannel(NewsChannel channel) async {
     final db = await database;
+    // 假設 NewsChannel 有 toSqliteMap 方法
     await db.update(
       'channels',
       channel.toSqliteMap(channel.channelOrder),
@@ -93,10 +96,22 @@ class DatabaseService {
     await batch.commit(noResult: true);
   }
 
-  // D - 刪除頻道
-  Future<void> deleteChannel(int id) async {
+  // -----------------------------------------------------------------
+  // ❗ 修正錯誤：新增批量更新 isHidden 的方法 ❗
+  // -----------------------------------------------------------------
+
+  // U - 批量更新所有頻道的 isHidden 狀態 (用於設定頁面的一鍵隱藏/顯示)
+  Future<void> updateAllChannelsVisibility({required bool isHidden}) async {
     final db = await database;
-    await db.delete('channels', where: 'id = ?', whereArgs: [id]);
+    // isHidden (bool) 在 SQLite 中以 1 (true) 或 0 (false) 儲存
+    final int value = isHidden ? 1 : 0;
+
+    // 執行 SQL UPDATE 語句，where: '1' 確保更新所有行
+    await db.update(
+      'channels',
+      {'isHidden': value}, // 設定所有頻道的 isHidden 欄位為 value
+      where: '1',
+    );
   }
 
   // ------------------------------------
@@ -136,6 +151,7 @@ class DatabaseService {
         currentMaxOrder++; // 排序值遞增
 
         // 4. 新增到批次操作
+        // 假設 NewsChannel 有 toSqliteMap 方法接受 order 參數
         batch.insert(
           'channels',
           channel.toSqliteMap(currentMaxOrder),
@@ -147,5 +163,11 @@ class DatabaseService {
 
     await batch.commit(noResult: true);
     return addedCount;
+  }
+
+  // D - 刪除頻道
+  Future<void> deleteChannel(int id) async {
+    final db = await database;
+    await db.delete('channels', where: 'id = ?', whereArgs: [id]);
   }
 }

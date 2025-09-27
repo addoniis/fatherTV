@@ -2,22 +2,20 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:news_stream_app/models/channel.dart';
-import 'package:news_stream_app/providers/channel_provider.dart';
-// 【關鍵新增點 1】：導入 AddChannelPage
-import 'package:news_stream_app/pages/add_channel_page.dart';
-// import 'package:news_stream_app/services/backup_service.dart'; // <--- 備份服務不再這裡使用，可移除
+// 保持別名導入：將 models/channel.dart 導入為 models
+import '../models/channel.dart' as models;
+import '../providers/channel_provider.dart';
+import './add_channel_page.dart';
 
 class ChannelManagementPage extends ConsumerWidget {
   const ChannelManagementPage({super.key});
 
-  // 輔助函數：顯示 SnackBar 訊息 (保留，用於刪除和隱藏操作的反饋)
+  // 輔助函數：顯示 SnackBar 訊息
   void _showSnackbar(
     BuildContext context,
     String message, {
     Color color = Colors.green,
   }) {
-    // 【安全檢查】：確保 context 仍然掛載
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -28,7 +26,74 @@ class ChannelManagementPage extends ConsumerWidget {
     );
   }
 
-  // ------------------------- 匯出/匯入邏輯已移除 -------------------------
+  // ----------------------------------------------------
+  // 【新增】: 批量操作的確認對話框
+  // ----------------------------------------------------
+  Future<bool> _showBulkConfirmationDialog(
+    BuildContext context,
+    String title,
+    String content,
+    String confirmText,
+    Color confirmColor,
+  ) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (context) {
+            return AlertDialog(
+              title: Text(title),
+              content: Text(content),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('取消'),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: Text(
+                    confirmText,
+                    style: TextStyle(color: confirmColor),
+                  ),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+  }
+
+  // 處理頻道刪除的邏輯，並包含「至少保留一個」的檢查
+  Future<bool> _handleChannelDeletion(
+    BuildContext context,
+    models.NewsChannel channel,
+    WidgetRef ref,
+  ) async {
+    // 1. 取得當前頻道列表總數
+    final currentChannels = ref.read(channelListProvider);
+
+    // 2. 核心檢查：如果列表只剩一個，則阻止刪除。
+    if (currentChannels.length <= 1) {
+      _showSnackbar(context, '必須保留至少一個頻道！請前往「設定」使用重置功能。', color: Colors.orange);
+      return false; // 返回 false，阻止 Dismissible 執行
+    }
+
+    // 3. 彈出確認對話框
+    final confirmed = await _showBulkConfirmationDialog(
+      context,
+      '確認刪除',
+      '確定要刪除頻道: ${channel.name} 嗎？',
+      '確定',
+      Colors.red,
+    );
+
+    if (confirmed) {
+      // 4. 執行刪除操作 (使用 deleteChannel)
+      ref.read(channelListProvider.notifier).deleteChannel(channel);
+      _showSnackbar(context, '已刪除頻道: ${channel.name}');
+      return true; // 允許 Dismissible 移除 Widget
+    }
+
+    return false; // 取消刪除
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -37,15 +102,11 @@ class ChannelManagementPage extends ConsumerWidget {
     final notifier = ref.read(channelListProvider.notifier);
 
     // 定義顏色常量
-    // 頻道可見時的文字顏色
     const Color visibleColor = Colors.white;
-    // 頻道隱藏時的灰白色
     const Color hiddenColor = Colors.white54;
+    const Color appBarColor = Colors.black;
 
-    // 設定 AppBar 顏色
-    const Color appBarColor = Colors.black; // 統一使用黑色作為深色主題的 AppBar
-
-    // 如果列表是空的，可以顯示一個提示
+    // 如果列表是空的，顯示提示 (作為安全網)
     if (channels.isEmpty) {
       return Scaffold(
         appBar: AppBar(
@@ -53,7 +114,7 @@ class ChannelManagementPage extends ConsumerWidget {
           backgroundColor: appBarColor,
           foregroundColor: Colors.white,
         ),
-        backgroundColor: Colors.black, // 設定深色背景
+        backgroundColor: Colors.black,
         body: const Center(
           child: Text(
             '目前沒有任何頻道。請從設定頁面匯入。',
@@ -68,13 +129,47 @@ class ChannelManagementPage extends ConsumerWidget {
         title: const Text('頻道管理與排序'),
         backgroundColor: appBarColor,
         foregroundColor: Colors.white,
+
+        // ----------------------------------------------------
+        // ❗ 新增批量操作按鈕到 AppBar Actions ❗
+        // ----------------------------------------------------
+        actions: [
+          // 1. 一鍵隱藏所有頻道
+          IconButton(
+            icon: const Icon(Icons.visibility_off, color: Colors.white),
+            tooltip: '一鍵隱藏所有頻道',
+            onPressed: () async {
+              final confirmed = await _showBulkConfirmationDialog(
+                context,
+                '確認全部隱藏？',
+                '確定要將所有頻道在主頁隱藏嗎？',
+                '確認隱藏',
+                Colors.red,
+              );
+
+              if (confirmed) {
+                await notifier.hideAllChannels();
+                _showSnackbar(context, '所有頻道已隱藏！');
+              }
+            },
+          ),
+
+          // 2. 一鍵顯示所有頻道
+          IconButton(
+            icon: const Icon(Icons.visibility, color: Colors.green),
+            tooltip: '一鍵顯示所有頻道',
+            onPressed: () async {
+              await notifier.showAllChannels();
+              _showSnackbar(context, '所有頻道已顯示！');
+            },
+          ),
+        ],
       ),
-      backgroundColor: Colors.black, // 設定深色背景
-      // 【主要修正】: 使用 Column 包裹提示文字和 ReorderableListView
+      backgroundColor: Colors.black,
+
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 【新增】: 提示文字區塊 (放大且醒目)
           Padding(
             padding: const EdgeInsets.only(
               top: 16.0,
@@ -85,100 +180,68 @@ class ChannelManagementPage extends ConsumerWidget {
             child: Text(
               '💡 提示：\n    向左滑動任一頻道即可刪除。\n    長按左側圖示可拖曳排序。',
               style: TextStyle(
-                color: Colors.yellowAccent, // 使用醒目的黃色
-                fontSize: 14, // 放大字體
+                color: Colors.yellowAccent,
+                fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
             ),
           ),
 
-          // 【原來的 ReorderableListView.builder】
           Expanded(
             child: ReorderableListView.builder(
               itemCount: channels.length,
               onReorder: (oldIndex, newIndex) {
-                // 處理 ReorderableListView 特有的 newIndex 修正
                 if (oldIndex < newIndex) {
                   newIndex -= 1;
                 }
-                // 調用 Notifier 中的更新排序方法
                 notifier.updateOrder(oldIndex, newIndex);
               },
               itemBuilder: (context, index) {
                 final channel = channels[index];
 
-                // 根據隱藏狀態設定當前文字顏色
                 final Color textColor = channel.isHidden
                     ? hiddenColor
                     : visibleColor;
 
-                // 使用 Dismissible 實現滑動刪除功能
                 return Dismissible(
-                  key: ValueKey(channel.id), // 必須使用一個唯一的 Key
-                  direction: DismissDirection.endToStart, // 僅允許右向左滑動
+                  key: ValueKey(channel.id),
+                  direction: DismissDirection.endToStart,
                   background: Container(
                     color: Colors.red,
                     alignment: Alignment.centerRight,
                     padding: const EdgeInsets.only(right: 20),
                     child: const Icon(Icons.delete, color: Colors.white),
                   ),
+                  // 將所有的判斷和刪除邏輯移到 confirmDismiss
                   confirmDismiss: (direction) async {
-                    // 彈出確認對話框
-                    return await showDialog<bool>(
-                          context: context,
-                          builder: (context) {
-                            return AlertDialog(
-                              title: const Text('確認刪除'),
-                              content: Text('確定要刪除頻道: ${channel.name} 嗎？'),
-                              actions: [
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.of(context).pop(false),
-                                  child: const Text('取消'),
-                                ),
-                                TextButton(
-                                  onPressed: () =>
-                                      Navigator.of(context).pop(true),
-                                  child: const Text(
-                                    '確定',
-                                    style: TextStyle(color: Colors.red),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
-                        ) ??
-                        false;
+                    return await _handleChannelDeletion(context, channel, ref);
                   },
                   onDismissed: (direction) {
-                    // 執行刪除
-                    notifier.deleteChannel(channel);
-                    _showSnackbar(context, '已刪除頻道: ${channel.name}');
+                    // 實際的刪除已經在 confirmDismiss 裡完成。
                   },
 
-                  // 列表項 (ReorderableListView 要求每個 item 必須有 key)
+                  // 列表項
                   child: ListTile(
-                    key: ValueKey(channel.id), // ReorderableListView 要求 Key
-                    tileColor: Colors.black, // 深色背景
+                    key: ValueKey(channel.id),
+                    tileColor: Colors.black,
                     // 拖拽圖示
                     leading: Icon(Icons.drag_handle, color: textColor),
 
                     title: Text(
                       channel.name,
-                      style: TextStyle(color: textColor, fontSize: 18), // 放大標題
+                      style: TextStyle(color: textColor, fontSize: 18),
                     ),
                     subtitle: Text(
                       'ID: ${channel.videoId}',
-                      // 副標題顏色稍微更暗一點，增加層次感
                       style: TextStyle(
                         color: textColor.withOpacity(0.7),
                         fontSize: 14,
-                      ), // 放大副標題
+                      ),
                     ),
 
-                    // 【關鍵新增點 2】：新增編輯按鈕和隱藏/顯示按鈕的 Row
+                    // 編輯和隱藏/顯示按鈕
                     trailing: Row(
-                      mainAxisSize: MainAxisSize.min, // 確保 Row 只佔用所需的空間
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         // 1. 編輯按鈕
                         IconButton(
@@ -200,17 +263,14 @@ class ChannelManagementPage extends ConsumerWidget {
                         // 2. 隱藏/顯示切換按鈕
                         IconButton(
                           icon: Icon(
-                            // 根據 isHidden 狀態顯示不同圖示
                             channel.isHidden
                                 ? Icons.visibility_off
                                 : Icons.visibility,
-                            // 保持隱藏圖示為灰色，顯示圖示為綠色
                             color: channel.isHidden
                                 ? Colors.grey
                                 : Colors.green,
                           ),
                           onPressed: () {
-                            // 切換狀態並通知資料庫和 Riverpod
                             notifier.toggleHidden(channel);
                             _showSnackbar(
                               context,

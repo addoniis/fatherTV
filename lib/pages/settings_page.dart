@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
+// ...
+import 'package:news_stream_app/pages/faq_page.dart'; // 記得新增這行
+// ...
 // 【確保導入 AddChannelPage】
 import 'package:news_stream_app/pages/add_channel_page.dart';
 // 【修正 1】: 導入 AboutPage (確保您已在 /lib/pages/about_page.dart 建立此檔案)
@@ -190,6 +192,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     _showSnackbar(context, '頻道列表已成功恢復為預設狀態！');
   }
 
+  // ------------------------------------------------------------------
+  // 【批量隱藏頻道 確認對話框】 (此方法已不再使用，但為了保持程式碼整潔，我們將它刪除)
+  // ------------------------------------------------------------------
+  /*
+  Future<void> _showHideAllConfirmationDialog(...) async {
+    // ... 移除
+  }
+  */
+
   // 將 build 方法移入 State 類別
   @override
   Widget build(BuildContext context) {
@@ -207,7 +218,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       ),
       body: ListView(
         children: <Widget>[
-          // 【關鍵新增點 1】：獨立的「新增頻道」入口
+          // ----------------------------------------------------
+          // 頻道新增與管理
+          // ----------------------------------------------------
+          // 1. 獨立的「新增頻道」入口
           _buildSettingsTile(
             context,
             icon: Icons.add_circle_outline, // 使用 + 號圖標
@@ -221,12 +235,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             },
           ),
 
-          // 頻道管理與排序 (修改描述，因為新增功能已獨立)
+          // 2. 頻道管理與排序 (現在包含批量顯示/隱藏功能)
           _buildSettingsTile(
             context,
             icon: Icons.list,
             title: '頻道管理',
-            subtitle: '刪減、排序及隱藏頻道',
+            subtitle: '刪減、排序及切換頻道隱藏/顯示狀態 (包含批量操作)',
             onTap: () {
               Navigator.push(
                 context,
@@ -237,9 +251,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             },
           ),
 
-          const Divider(),
+          const Divider(), // 頻道管理與備份/還原之間的分隔線
+          // ----------------------------------------------------
+          // 資料備份與還原
+          // ----------------------------------------------------
 
-          // 1. 匯入頻道 (覆蓋) (保持不變)
+          // 3. 匯入頻道 (覆蓋) (保持不變)
           _buildSettingsTile(
             context,
             icon: Icons.upload_file,
@@ -252,7 +269,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             ),
           ),
 
-          // 2. 匯入新增頻道 (合併) (安全修正：在 await 之後檢查 mounted)
+          // 4. 匯入新增頻道 (合併) (保持不變)
           _buildSettingsTile(
             context,
             icon: Icons.playlist_add, // 使用新增播放清單的圖標
@@ -286,7 +303,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
             },
           ),
 
-          // 3. 匯出頻道 (安全修正：在 await 之後檢查 mounted)
+          // 5. 匯出頻道 (保持不變)
           _buildSettingsTile(
             context,
             icon: Icons.download_for_offline,
@@ -312,7 +329,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const Divider(),
 
-          // 4. 重置頻道 (保持不變)
+          // 6. 重置頻道 (保持不變)
           _buildSettingsTile(
             context,
             icon: Icons.restore,
@@ -323,7 +340,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
 
           const Divider(),
 
-          // 5. 關於 【已啟用導航】
+          // 7. 關於 【已啟用導航】
           _buildSettingsTile(
             context,
             icon: Icons.info_outline,
@@ -333,6 +350,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const AboutPage()),
+              );
+            },
+          ),
+          // 8.❗ 新增：常見問題 (FAQ) ❗
+          _buildSettingsTile(
+            context,
+            icon: Icons.help_outline,
+            title: '常見問題 (FAQ)',
+            onTap: () {
+              // 導航到 FAQPage
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const FAQPage()),
               );
             },
           ),
