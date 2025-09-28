@@ -54,7 +54,7 @@ class AboutPage extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               const Text(
-                '版本號: 1.3.0',
+                '版本號: 1.3.1',
                 style: TextStyle(color: Colors.grey, fontSize: 18),
               ),
               const SizedBox(height: 40),

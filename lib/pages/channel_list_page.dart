@@ -4,14 +4,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/channel.dart';
+import '../models/channel.dart'; // 這裡可能定義了 NewsChannel 或 Channel
 import '../providers/channel_provider.dart';
 import 'settings_page.dart';
 import 'player_page.dart';
 import '../widgets/channel_card.dart';
 
 // -------------------------------------------------------------
-// 輔助 Widget：用於添加發光/邊框焦點效果的自定義按鈕
+// 輔助 Widget：用於添加發光/邊框焦點效果的自定義按鈕 (TV 專用)
 // -------------------------------------------------------------
 class _FocusIconAction extends StatefulWidget {
   final IconData icon;
@@ -97,9 +97,15 @@ class ChannelListPage extends ConsumerStatefulWidget {
 class _ChannelListPageState extends ConsumerState<ChannelListPage>
     with WidgetsBindingObserver {
   bool _isInitialStart = true;
-  // FocusNode 保持不變，用於初始焦點和焦點循環
   final FocusNode _firstIconFocusNode = FocusNode();
   final FocusNode _firstCardFocusNode = FocusNode();
+
+  // 💡 核心：將 getter 改為方法，接收 context 參數
+  bool _isTvMode(BuildContext context) {
+    const double tvWidthThreshold = 1200.0;
+    final double screenWidth = MediaQuery.of(context).size.width;
+    return screenWidth > tvWidthThreshold;
+  }
 
   @override
   void initState() {
@@ -109,13 +115,13 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
-        // 🎯 修正處：將初始焦點設定為第一個頻道卡片
-        _firstCardFocusNode.requestFocus();
+        if (_isTvMode(context)) {
+          _firstCardFocusNode.requestFocus();
+        }
       }
     });
   }
 
-  // 保持生命週期和方向鎖定邏輯
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -170,16 +176,39 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
     );
   }
 
-  // 抽取功能按鈕列
+  // 🎯 修正錯誤：將 Channel 改為 NewsChannel
+  void _navigateToPlayer(BuildContext context, NewsChannel channel) {
+    // 允許所有方向
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => PlayerPage(channel: channel)),
+    ).then((_) {
+      // 返回頻道列表時，重新鎖定為橫向
+      _lockToLandscape();
+    });
+  }
+
+  // 💡 TV 模式專用的功能按鈕列 (在 body 頂部)
   Widget _buildActionRow(BuildContext context, bool isShowingAll) {
+    if (!_isTvMode(context)) {
+      return const SizedBox.shrink(); // 手機模式下不顯示
+    }
+
     return Container(
-      color: Colors.black, // 保持 Appbar 的背景色
+      color: Colors.black,
       padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           FocusTraversalGroup(
-            // 1. 眼睛按鈕 (切換顯示) - 使用 _firstIconFocusNode
+            // 1. 眼睛按鈕 (切換顯示)
             child: Padding(
               padding: const EdgeInsets.only(right: 12.0),
               child: _FocusIconAction(
@@ -214,21 +243,70 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
     );
   }
 
+  // 💡 手機模式專用的 AppBar Actions
+  // lib/pages/channel_list_page.dart (約第 267 行)
+
+  // 💡 手機模式專用的 AppBar Actions
+  List<Widget> _buildAppBarActions(BuildContext context, bool isShowingAll) {
+    if (_isTvMode(context)) {
+      return const [];
+    }
+
+    // 🎯 調整 Icon 的 size 和 IconButton 的間距
+    return [
+      // 1. 眼睛按鈕 (切換顯示)
+      IconButton(
+        // 調整 size 可以改變圖標大小
+        icon: Icon(
+          isShowingAll ? Icons.visibility : Icons.visibility_off,
+          color: isShowingAll ? Colors.redAccent : Colors.white,
+          size: 40.0, // 👈 調整這裡：例如從 28.0 增加到 30.0
+        ),
+        // 調整 padding 屬性 (如果需要)
+        padding: const EdgeInsets.symmetric(
+          horizontal: 14.0,
+        ), // 👈 調整間距：例如改為 4.0
+        onPressed: () => _toggleChannelVisibility(context),
+      ),
+      // 2. 設定按鈕
+      IconButton(
+        icon: const Icon(
+          Icons.settings,
+          color: Colors.white,
+          size: 40.0,
+        ), // 👈 調整這裡
+        padding: const EdgeInsets.symmetric(horizontal: 14.0), // 👈 調整間距
+        onPressed: () => _navigateToSettings(context),
+      ),
+      // 3. 退出按鈕
+      IconButton(
+        icon: const Icon(
+          Icons.exit_to_app,
+          color: Colors.white,
+          size: 40.0,
+        ), // 👈 調整這裡
+        padding: const EdgeInsets.symmetric(
+          horizontal: 50.0,
+        ), // 👈 調整這裡可以讓最右邊的間距大一點
+        onPressed: () => SystemNavigator.pop(),
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final channels = ref.watch(visibleChannelListProvider);
     final isShowingAll = ref.watch(showAllChannelsProvider);
-
-    // 檢查初始載入中
     final allChannels = ref.watch(channelListProvider);
+    final bool isTvMode = _isTvMode(context);
 
-    // 狀態 1: 初始載入中 (allChannels 列表還沒有資料)
+    // 狀態 1: 初始載入中
     if (allChannels.isEmpty) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('新聞直播頻道列表'),
           backgroundColor: Colors.black,
-          actions: const [], // 載入中不需要功能按鈕
+          actions: const [],
         ),
         body: const Center(
           child: CircularProgressIndicator(color: Colors.white),
@@ -242,7 +320,7 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
         appBar: AppBar(
           title: const Text('新聞直播頻道列表'),
           backgroundColor: Colors.black,
-          actions: const [], // 這裡不放按鈕，讓焦點集中在 body
+          actions: _buildAppBarActions(context, isShowingAll),
         ),
         body: Center(
           child: Padding(
@@ -262,7 +340,6 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 30),
-                // 在空狀態下，提供明確的動作按鈕
                 ElevatedButton.icon(
                   onPressed: () => _navigateToSettings(context),
                   icon: const Icon(Icons.settings, size: 30),
@@ -283,18 +360,25 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
       );
     }
 
-    // 狀態 3: 正常列表內容
+    // 狀態 3: 正常列表內容 (響應式設計的關鍵)
     return Scaffold(
       appBar: AppBar(
-        title: const Text('阿爸的電視'),
+        // 🎯 調整這裡的 TextStyle 來自訂字體大小、顏色、粗細等
+        title: const Text(
+          '阿爸的電視',
+          style: TextStyle(
+            fontSize: 36.0, // 👈 關鍵調整：將字體大小改為你想要的值（例如 28.0）
+            fontWeight: FontWeight.bold, // 可選：讓字體更粗
+            color: Colors.white, // 可選：確保顏色正確
+          ),
+        ),
         backgroundColor: Colors.black,
-        actions: const [], // 確保 AppBar actions 永遠是空的
+        actions: _buildAppBarActions(context, isShowingAll),
       ),
       body: Column(
         children: [
-          _buildActionRow(context, isShowingAll),
+          if (isTvMode) _buildActionRow(context, isShowingAll),
 
-          // 將 GridView 放置在 Row 下方，並佔用剩餘空間
           Expanded(
             child: GridView.builder(
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -307,15 +391,15 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
               itemCount: channels.length,
               itemBuilder: (context, index) {
                 final channel = channels[index];
-
-                // 傳遞 focusNode 給第一個 ChannelCard，完成焦點迴圈
-                // 這是確保焦點能正確從卡片跳回功能列的關鍵
-                final focusNode = index == 0 ? _firstCardFocusNode : null;
+                final focusNode = isTvMode && index == 0
+                    ? _firstCardFocusNode
+                    : null;
 
                 return ChannelCard(
                   key: ValueKey(channel.id),
                   channel: channel,
                   focusNode: focusNode,
+                  onTap: () => _navigateToPlayer(context, channel),
                 );
               },
             ),

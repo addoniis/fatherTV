@@ -1,3 +1,6 @@
+V1.3.1
+ 解決加入Android TV後，手機排版出現問題
+
 V1.3.0
  加入支援Android TV
 
