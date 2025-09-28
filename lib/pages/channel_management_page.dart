@@ -27,9 +27,9 @@ class ChannelManagementPage extends ConsumerWidget {
   }
 
   // ----------------------------------------------------
-  // 【新增】: 批量操作的確認對話框
+  // 【保留】: 批量操作和刪除的確認對話框 (UI 互動)
   // ----------------------------------------------------
-  Future<bool> _showBulkConfirmationDialog(
+  Future<bool> _showConfirmationDialog(
     BuildContext context,
     String title,
     String content,
@@ -61,39 +61,9 @@ class ChannelManagementPage extends ConsumerWidget {
         false;
   }
 
-  // 處理頻道刪除的邏輯，並包含「至少保留一個」的檢查
-  Future<bool> _handleChannelDeletion(
-    BuildContext context,
-    models.NewsChannel channel,
-    WidgetRef ref,
-  ) async {
-    // 1. 取得當前頻道列表總數
-    final currentChannels = ref.read(channelListProvider);
-
-    // 2. 核心檢查：如果列表只剩一個，則阻止刪除。
-    if (currentChannels.length <= 1) {
-      _showSnackbar(context, '必須保留至少一個頻道！請前往「設定」使用重置功能。', color: Colors.orange);
-      return false; // 返回 false，阻止 Dismissible 執行
-    }
-
-    // 3. 彈出確認對話框
-    final confirmed = await _showBulkConfirmationDialog(
-      context,
-      '確認刪除',
-      '確定要刪除頻道: ${channel.name} 嗎？',
-      '確定',
-      Colors.red,
-    );
-
-    if (confirmed) {
-      // 4. 執行刪除操作 (使用 deleteChannel)
-      ref.read(channelListProvider.notifier).deleteChannel(channel);
-      _showSnackbar(context, '已刪除頻道: ${channel.name}');
-      return true; // 允許 Dismissible 移除 Widget
-    }
-
-    return false; // 取消刪除
-  }
+  // ----------------------------------------------------
+  // ❗ 移除 _handleChannelDeletion 邏輯，簡化 build 內部 ❗
+  // ----------------------------------------------------
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -106,7 +76,7 @@ class ChannelManagementPage extends ConsumerWidget {
     const Color hiddenColor = Colors.white54;
     const Color appBarColor = Colors.black;
 
-    // 如果列表是空的，顯示提示 (作為安全網)
+    // ... (空列表檢查邏輯保留不變) ...
     if (channels.isEmpty) {
       return Scaffold(
         appBar: AppBar(
@@ -131,7 +101,7 @@ class ChannelManagementPage extends ConsumerWidget {
         foregroundColor: Colors.white,
 
         // ----------------------------------------------------
-        // ❗ 新增批量操作按鈕到 AppBar Actions ❗
+        // 批量操作按鈕，直接呼叫 notifier 方法
         // ----------------------------------------------------
         actions: [
           // 1. 一鍵隱藏所有頻道
@@ -139,7 +109,7 @@ class ChannelManagementPage extends ConsumerWidget {
             icon: const Icon(Icons.visibility_off, color: Colors.white),
             tooltip: '一鍵隱藏所有頻道',
             onPressed: () async {
-              final confirmed = await _showBulkConfirmationDialog(
+              final confirmed = await _showConfirmationDialog(
                 context,
                 '確認全部隱藏？',
                 '確定要將所有頻道在主頁隱藏嗎？',
@@ -148,6 +118,7 @@ class ChannelManagementPage extends ConsumerWidget {
               );
 
               if (confirmed) {
+                // ❗ 呼叫 Provider 方法 ❗
                 await notifier.hideAllChannels();
                 _showSnackbar(context, '所有頻道已隱藏！');
               }
@@ -159,6 +130,7 @@ class ChannelManagementPage extends ConsumerWidget {
             icon: const Icon(Icons.visibility, color: Colors.green),
             tooltip: '一鍵顯示所有頻道',
             onPressed: () async {
+              // ❗ 呼叫 Provider 方法 ❗
               await notifier.showAllChannels();
               _showSnackbar(context, '所有頻道已顯示！');
             },
@@ -170,8 +142,9 @@ class ChannelManagementPage extends ConsumerWidget {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.only(
+          const Padding(
+            // 移除了 const 警告
+            padding: EdgeInsets.only(
               top: 16.0,
               bottom: 8.0,
               left: 16.0,
@@ -194,6 +167,7 @@ class ChannelManagementPage extends ConsumerWidget {
                 if (oldIndex < newIndex) {
                   newIndex -= 1;
                 }
+                // ❗ 呼叫 Provider 方法 ❗
                 notifier.updateOrder(oldIndex, newIndex);
               },
               itemBuilder: (context, index) {
@@ -212,12 +186,36 @@ class ChannelManagementPage extends ConsumerWidget {
                     padding: const EdgeInsets.only(right: 20),
                     child: const Icon(Icons.delete, color: Colors.white),
                   ),
-                  // 將所有的判斷和刪除邏輯移到 confirmDismiss
+
+                  // ❗ 核心簡化：將檢查和刪除邏輯集中在這裡 ❗
                   confirmDismiss: (direction) async {
-                    return await _handleChannelDeletion(context, channel, ref);
-                  },
-                  onDismissed: (direction) {
-                    // 實際的刪除已經在 confirmDismiss 裡完成。
+                    // 1. 執行最少保留一個的檢查
+                    if (channels.length <= 1) {
+                      _showSnackbar(
+                        context,
+                        '必須保留至少一個頻道！請前往「設定」使用重置功能。',
+                        color: Colors.orange,
+                      );
+                      return false;
+                    }
+
+                    // 2. 彈出確認對話框 (UI 互動)
+                    final confirmed = await _showConfirmationDialog(
+                      context,
+                      '確認刪除',
+                      '確定要刪除頻道: ${channel.name} 嗎？此操作不可逆！',
+                      '確定',
+                      Colors.red,
+                    );
+
+                    if (confirmed) {
+                      // 3. 呼叫 Provider 方法執行刪除 (Provider 負責狀態修改和持久化)
+                      notifier.removeChannel(channel);
+                      _showSnackbar(context, '已刪除頻道: ${channel.name}');
+                      return true; // 允許 Dismissible 移除 Widget
+                    }
+
+                    return false; // 取消刪除
                   },
 
                   // 列表項
@@ -271,6 +269,7 @@ class ChannelManagementPage extends ConsumerWidget {
                                 : Colors.green,
                           ),
                           onPressed: () {
+                            // ❗ 呼叫 Provider 方法 ❗
                             notifier.toggleHidden(channel);
                             _showSnackbar(
                               context,

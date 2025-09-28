@@ -60,14 +60,13 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
   }
 
   // ----------------------------------------------------
-  // ❗ 批量管理功能 (新增) ❗
+  // 批量管理功能 (已實現)
   // ----------------------------------------------------
 
   // U - 批量隱藏所有頻道
   Future<void> hideAllChannels() async {
     // 1. 批量更新資料庫 (需要 DatabaseService 支援此方法)
     // 假設 DatabaseService 有一個方法來更新所有頻道的 isHidden 狀態
-    // 如果您需要 DatabaseService 的實作細節，請告知
     await _databaseService.updateAllChannelsVisibility(isHidden: true);
 
     // 2. 更新 Riverpod 狀態
@@ -84,10 +83,10 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
   }
 
   // ----------------------------------------------------
-  // 以下是您原有的 CRUD 邏輯...
+  // CRUD 邏輯 (修正 delete/remove 方法名稱)
   // ----------------------------------------------------
 
-  // 初始化：從資料庫加載頻道，如果資料庫為空，則載入靜態預設列表
+  // 初始化：從資料庫加載頻道
   Future<void> loadChannels() async {
     List<NewsChannel> channels = await _databaseService
         .getAllChannelsForManagement();
@@ -114,10 +113,11 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
     }
   }
 
-  // U - 刪除頻道
-  Future<void> deleteChannel(NewsChannel channel) async {
+  // ❗ U - 刪除頻道 (原 deleteChannel，改為 removeChannel 以匹配 UI) ❗
+  Future<void> removeChannel(NewsChannel channel) async {
     if (channel.id == null) return;
     await _databaseService.deleteChannel(channel.id!);
+
     // 更新狀態 (從列表中移除)
     state = state.where((c) => c.id != channel.id).toList();
   }
@@ -138,6 +138,13 @@ class ChannelNotifier extends StateNotifier<List<NewsChannel>> {
   Future<void> updateOrder(int oldIndex, int newIndex) async {
     // 1. 在記憶體中處理排序邏輯
     final List<NewsChannel> updatedList = List.from(state);
+
+    // ReorderableListView 的標準處理邏輯:
+    // 當從上往下拖曳時，newIndex 會是目標位置的下一個索引，需要 -1。
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+
     final channelToMove = updatedList.removeAt(oldIndex);
     updatedList.insert(newIndex, channelToMove);
 
