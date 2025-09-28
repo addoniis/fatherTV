@@ -4,17 +4,89 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../models/channel.dart'; // 引入 NewsChannel model
-import '../providers/channel_provider.dart'; // 引入 Riverpod Providers
-import 'settings_page.dart'; // 引入設定頁面
-import 'player_page.dart'; // 引入播放器頁面
-
-// 🚨 修正錯誤：這是重構的成果，確保路徑正確 🚨
+import '../models/channel.dart';
+import '../providers/channel_provider.dart';
+import 'settings_page.dart';
+import 'player_page.dart';
 import '../widgets/channel_card.dart';
+
+// -------------------------------------------------------------
+// 輔助 Widget：用於添加發光/邊框焦點效果的自定義按鈕
+// -------------------------------------------------------------
+class _FocusIconAction extends StatefulWidget {
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+  final FocusNode? focusNode;
+  final Color focusColor;
+
+  const _FocusIconAction({
+    super.key,
+    required this.icon,
+    required this.color,
+    required this.onPressed,
+    this.focusNode,
+    this.focusColor = Colors.redAccent,
+  });
+
+  @override
+  _FocusIconActionState createState() => _FocusIconActionState();
+}
+
+class _FocusIconActionState extends State<_FocusIconAction> {
+  bool _isFocused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    const double focusBorderWidth = 3.0;
+    final Color effectiveColor = _isFocused ? widget.focusColor : widget.color;
+
+    return Focus(
+      focusNode: widget.focusNode,
+      onFocusChange: (hasFocus) {
+        setState(() {
+          _isFocused = hasFocus;
+        });
+      },
+      onKey: (FocusNode node, RawKeyEvent event) {
+        if (event is RawKeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter) {
+            widget.onPressed();
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Container(
+        padding: const EdgeInsets.all(5.0),
+        decoration: BoxDecoration(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(10.0),
+          border: Border.all(
+            color: _isFocused ? widget.focusColor : Colors.transparent,
+            width: _isFocused ? focusBorderWidth : 0.0,
+          ),
+          boxShadow: [
+            if (_isFocused)
+              BoxShadow(
+                color: widget.focusColor.withOpacity(0.5),
+                spreadRadius: 2,
+                blurRadius: 10,
+              ),
+          ],
+        ),
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          child: Icon(widget.icon, size: 36.0, color: effectiveColor),
+        ),
+      ),
+    );
+  }
+}
 
 // ------------------- ChannelListPage 程式碼開始 -------------------
 
-// ChannelListPage 升級為 ConsumerStatefulWidget
 class ChannelListPage extends ConsumerStatefulWidget {
   const ChannelListPage({super.key});
 
@@ -22,49 +94,48 @@ class ChannelListPage extends ConsumerStatefulWidget {
   ConsumerState<ChannelListPage> createState() => _ChannelListPageState();
 }
 
-// State類，並混合 WidgetsBindingObserver
 class _ChannelListPageState extends ConsumerState<ChannelListPage>
     with WidgetsBindingObserver {
-  // 追蹤 App 是否是第一次啟動
   bool _isInitialStart = true;
+  // FocusNode 保持不變，用於初始焦點和焦點循環
+  final FocusNode _firstIconFocusNode = FocusNode();
+  final FocusNode _firstCardFocusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    // 啟動生命週期監聽
     WidgetsBinding.instance.addObserver(this);
-    // 首次啟動時鎖定
     _lockToLandscape();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        // 🎯 修正處：將初始焦點設定為第一個頻道卡片
+        _firstCardFocusNode.requestFocus();
+      }
+    });
   }
 
-  // 從 PlayerPage 返回時會觸發此方法
+  // 保持生命週期和方向鎖定邏輯
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     if (!_isInitialStart) {
-      // 給系統 50 毫秒時間完成 PlayerPage 的銷毀
       Future.delayed(const Duration(milliseconds: 50), () {
-        // 確保 Widget 仍然在畫面上 (mounted)，才執行鎖定
         if (mounted) {
           _lockToLandscape();
         }
       });
     }
-    // 標記為非首次啟動
     _isInitialStart = false;
   }
 
-  // 當 App 從背景或直屏頁面 (Settings) 返回時會觸發
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // 每次應用程式恢復時，強制鎖定橫屏
       _lockToLandscape();
     }
   }
 
-  // 輔助函式：強制鎖定為橫屏
   void _lockToLandscape() {
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
@@ -74,12 +145,12 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
 
   @override
   void dispose() {
-    // 移除生命週期監聽，避免記憶體洩漏
     WidgetsBinding.instance.removeObserver(this);
+    _firstIconFocusNode.dispose();
+    _firstCardFocusNode.dispose();
     super.dispose();
   }
 
-  // 導航到設定頁面的函式
   void _navigateToSettings(BuildContext context) {
     Navigator.push(
       context,
@@ -87,14 +158,10 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
     );
   }
 
-  // 處理頻道顯示切換
   void _toggleChannelVisibility(BuildContext context) {
-    // 使用 ref.read 存取狀態
     final currentStatus = ref.read(showAllChannelsProvider);
-    // 切換狀態
     ref.read(showAllChannelsProvider.notifier).state = !currentStatus;
 
-    // 提示用戶狀態已切換
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(!currentStatus ? '已顯示所有頻道 (包含隱藏)' : '已隱藏設定中隱藏的頻道'),
@@ -103,28 +170,65 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
     );
   }
 
+  // 抽取功能按鈕列
+  Widget _buildActionRow(BuildContext context, bool isShowingAll) {
+    return Container(
+      color: Colors.black, // 保持 Appbar 的背景色
+      padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          FocusTraversalGroup(
+            // 1. 眼睛按鈕 (切換顯示) - 使用 _firstIconFocusNode
+            child: Padding(
+              padding: const EdgeInsets.only(right: 12.0),
+              child: _FocusIconAction(
+                focusNode: _firstIconFocusNode,
+                icon: isShowingAll ? Icons.visibility : Icons.visibility_off,
+                color: Colors.white,
+                focusColor: isShowingAll ? Colors.redAccent : Colors.white,
+                onPressed: () => _toggleChannelVisibility(context),
+              ),
+            ),
+          ),
+
+          // 2. 設定按鈕
+          _FocusIconAction(
+            icon: Icons.settings,
+            color: Colors.white,
+            onPressed: () => _navigateToSettings(context),
+          ),
+
+          // 3. 退出按鈕
+          Padding(
+            padding: const EdgeInsets.only(left: 12.0, right: 20.0),
+            child: _FocusIconAction(
+              icon: Icons.exit_to_app,
+              color: Colors.white,
+              focusColor: Colors.red,
+              onPressed: () => SystemNavigator.pop(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 監聽 "可見" 的頻道列表
     final channels = ref.watch(visibleChannelListProvider);
-
-    // 監聽切換按鈕的狀態 (我們保留它，因為 AppBar 需要它)
     final isShowingAll = ref.watch(showAllChannelsProvider);
 
-    // 處理初始化載入中狀態
-    if (channels.isEmpty &&
-        ref.read(channelListProvider.notifier).state.isEmpty) {
+    // 檢查初始載入中
+    final allChannels = ref.watch(channelListProvider);
+
+    // 狀態 1: 初始載入中 (allChannels 列表還沒有資料)
+    if (allChannels.isEmpty) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('新聞直播頻道列表'),
           backgroundColor: Colors.black,
-          actions: [
-            // 由於是初始載入中，這裡的眼睛按鈕不顯示或保持預設狀態
-            IconButton(
-              icon: const Icon(Icons.settings, size: 36.0),
-              onPressed: () => _navigateToSettings(context),
-            ),
-          ],
+          actions: const [], // 載入中不需要功能按鈕
         ),
         body: const Center(
           child: CircularProgressIndicator(color: Colors.white),
@@ -132,40 +236,13 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
       );
     }
 
-    // 處理列表為空（已載入完畢，但沒有頻道）的狀態
-    if (channels.isEmpty &&
-        ref.read(channelListProvider.notifier).state.isNotEmpty &&
-        !isShowingAll) {
+    // 狀態 2: 列表已載入，但篩選後為空
+    if (channels.isEmpty) {
       return Scaffold(
         appBar: AppBar(
           title: const Text('新聞直播頻道列表'),
           backgroundColor: Colors.black,
-          actions: [
-            // 處理空狀態時的「顯示全部」按鈕
-            Padding(
-              padding: const EdgeInsets.only(right: 12.0),
-              child: IconButton(
-                icon: Icon(
-                  isShowingAll ? Icons.visibility : Icons.visibility_off,
-                  size: 36.0,
-                  color: isShowingAll ? Colors.redAccent : Colors.white,
-                ),
-                onPressed: () => _toggleChannelVisibility(context),
-              ),
-            ),
-
-            IconButton(
-              icon: const Icon(Icons.settings, size: 36.0),
-              onPressed: () => _navigateToSettings(context),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 30.0),
-              child: IconButton(
-                icon: const Icon(Icons.exit_to_app, size: 36.0),
-                onPressed: () => SystemNavigator.pop(),
-              ),
-            ),
-          ],
+          actions: const [], // 這裡不放按鈕，讓焦點集中在 body
         ),
         body: Center(
           child: Padding(
@@ -184,13 +261,8 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 10),
-                const Text(
-                  '請點擊右上角的設定按鈕，進入「頻道管理」頁面新增或顯示頻道，或點擊眼睛圖示顯示隱藏頻道。',
-                  style: TextStyle(color: Colors.grey, fontSize: 18),
-                  textAlign: TextAlign.center,
-                ),
                 const SizedBox(height: 30),
+                // 在空狀態下，提供明確的動作按鈕
                 ElevatedButton.icon(
                   onPressed: () => _navigateToSettings(context),
                   icon: const Icon(Icons.settings, size: 30),
@@ -211,66 +283,45 @@ class _ChannelListPageState extends ConsumerState<ChannelListPage>
       );
     }
 
-    // 實際列表內容 - 卡片式橫向網格佈局
+    // 狀態 3: 正常列表內容
     return Scaffold(
       appBar: AppBar(
         title: const Text('阿爸的電視'),
         backgroundColor: Colors.black,
-        actions: [
-          // 1. 顯示/隱藏所有頻道按鈕 (眼睛圖示)
-          Padding(
-            padding: const EdgeInsets.only(right: 12.0),
-            child: IconButton(
-              icon: Icon(
-                // 根據狀態切換圖示：顯示全部時為睜開眼，否則為閉上眼
-                isShowingAll ? Icons.visibility : Icons.visibility_off,
-                size: 36.0,
-                color: isShowingAll
-                    ? Colors.redAccent
-                    : Colors.white, // 給予切換時不同的顏色提示
-              ),
-              onPressed: () => _toggleChannelVisibility(context),
-            ),
-          ),
+        actions: const [], // 確保 AppBar actions 永遠是空的
+      ),
+      body: Column(
+        children: [
+          _buildActionRow(context, isShowingAll),
 
-          // 2. 設定按鈕
-          Padding(
-            padding: const EdgeInsets.only(right: 12.0),
-            child: IconButton(
-              icon: const Icon(Icons.settings, size: 36.0),
-              onPressed: () => _navigateToSettings(context),
-            ),
-          ),
-          // 3. 退出按鈕
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 30.0),
-            child: IconButton(
-              icon: const Icon(Icons.exit_to_app, size: 36.0),
-              onPressed: () => SystemNavigator.pop(),
+          // 將 GridView 放置在 Row 下方，並佔用剩餘空間
+          Expanded(
+            child: GridView.builder(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 165.0,
+                mainAxisSpacing: 15.0,
+                crossAxisSpacing: 20.0,
+                childAspectRatio: 1.2,
+              ),
+              padding: const EdgeInsets.all(10.0),
+              itemCount: channels.length,
+              itemBuilder: (context, index) {
+                final channel = channels[index];
+
+                // 傳遞 focusNode 給第一個 ChannelCard，完成焦點迴圈
+                // 這是確保焦點能正確從卡片跳回功能列的關鍵
+                final focusNode = index == 0 ? _firstCardFocusNode : null;
+
+                return ChannelCard(
+                  key: ValueKey(channel.id),
+                  channel: channel,
+                  focusNode: focusNode,
+                );
+              },
             ),
           ),
         ],
       ),
-
-      // 【關鍵：簡化後的 GridView.builder】
-      body: GridView.builder(
-        // 使用 MaxCrossAxisExtent，設置每個卡片的最大寬度
-        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-          maxCrossAxisExtent: 165.0, // 設定每個卡片的最大寬度
-          mainAxisSpacing: 15.0, // 主軸間距
-          crossAxisSpacing: 20.0, // 交叉軸間距
-          childAspectRatio: 1.2, // 寬高比
-        ),
-        padding: const EdgeInsets.all(10.0),
-        itemCount: channels.length,
-        itemBuilder: (context, index) {
-          final channel = channels[index];
-
-          // 🚨 重構成果：直接使用 ChannelCard 元件 🚨
-          return ChannelCard(channel: channel);
-        },
-      ),
     );
   }
 }
-// ------------------- ChannelListPage 程式碼結束 -------------------
